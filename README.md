@@ -22,9 +22,9 @@ Follow these steps to download the project and get started:
 
 3. **Clone the Repository**
    ```sh
-   git clone https://github.com/your-username/your-repo.git
+   git clone https://github.com/zetaminer/Canvas_SBG.git
    ```
-   Replace the URL with the repository URL.
+   
 
 4. **Navigate to the Project Directory**
    ```sh
