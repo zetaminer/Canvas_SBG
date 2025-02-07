@@ -8,7 +8,7 @@ API_URL = 'https://morenetlab.instructure.com'
 TOKEN = 'YOUR_TOKEN_HERE'
 canvas = Canvas(API_URL, TOKEN)
 ACCOUNT_ID = 1
-COURSE_ID = 515
+COURSE_ID = 000 # find your course id this is a place holder
 DATA_FILE = "canvas_data.json"
 DEFAULT_PASSWORD = "Pass123!"
 
@@ -20,7 +20,7 @@ DEFAULT_PASSWORD = "Pass123!"
 def load_token():
     with open("config.json", "r") as file:
         config = json.load(file)
-    return config["TOKEN"]
+    return config["TOKEN"], config["COURSE_ID"]
 
 
 def save_data_to_file(data):
@@ -264,7 +264,8 @@ def check_URL_Response():
 # ==================== Example Usage ==================== #
 
 if __name__ == "__main__":
-    TOKEN = load_token()  # load token from private json, if you hard code it you can remove this line
+    TOKEN, COURSE_ID = load_token()  # load token, and course id from private json, if you hard code it you can remove this line
+
     # Create and enroll students, then accept invites
     # create_test_students()
     # enroll_students_to_course(COURSE_ID)
