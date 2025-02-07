@@ -17,10 +17,10 @@ Here are helpful links for documentation and learning materials:
 3. [CanvasAPI 3.2.0 Documentation](https://canvasapi.readthedocs.io/)  
    A Python wrapper for the Canvas API. Use this if you plan to interact with Canvas programmatically.
 
-4. [Find Your Superpower - Learn Programming Using Canvas APIs (YouTube)](https://www.youtube.com/)  
+4. [Find Your Superpower - Learn Programming Using Canvas APIs (YouTube)](https://www.youtube.com/watch?v=6AEzuo7gElM)  
    A great video resource to understand how to use Canvas APIs effectively.
 
-5. [Canvas APIs: Getting Started - Instructure Community](https://community.canvaslms.com/)  
+5. [Canvas APIs: Getting Started - Instructure Community](https://community.canvaslms.com/t5/Canvas-Developers-Group/Canvas-APIs-Getting-started-the-practical-ins-and-outs-gotchas/ba-p/263685)  
    A community resource for learning the practical ins and outs of using Canvas APIs.
 
 ---
@@ -39,7 +39,7 @@ Before you begin:
 The **Course ID** is a unique identifier for each course in Canvas. Here's how to locate it:
 
 1. **Log in to Canvas LMS:**
-   Visit [Canvas Login](https://canvas.instructure.com/) and sign in.
+   
 
 2. **Navigate to the Course:**
    Open the course you want the ID for.
@@ -55,7 +55,7 @@ The **Course ID** is a unique identifier for each course in Canvas. Here's how t
 A User Token is required to authenticate API requests.
 
 1. **Log in to Canvas:**
-Visit [Canvas Login](https://canvas.instructure.com/) and sign in.
+
 
 2. **Access Profile Settings:**
 - Click your profile picture or initials in the top-right corner.
