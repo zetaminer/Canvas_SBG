@@ -1,0 +1,29 @@
+# Ignore configuration files
+config.json
+
+# Virtual Environment (Windows)
+Lib/
+Scripts/
+pyvenv.cfg
+
+# Virtual Environment (Linux/macOS)
+venv/
+
+# Bytecode files
+__pycache__/
+*.pyc
+*.pyo
+
+# Logs and environment files
+*.log
+.env
+*.env
+
+# Ignore IDE/editor files
+.vscode/
+.idea/
+*.sublime-workspace
+
+# Ignore system files
+.DS_Store
+Thumbs.db
