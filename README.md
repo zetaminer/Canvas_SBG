@@ -28,7 +28,7 @@ Follow these steps to download the project and get started:
 
 4. **Navigate to the Project Directory**
    ```sh
-   cd your-repo
+   cd Canvas_SBG
    ```
 
 ### Install Python
@@ -49,53 +49,7 @@ Follow these steps to download the project and get started:
    ```
    This should display the installed Python version.
 
-### Set Up the Environment
-
-1. **Install Dependencies**
-   Ensure you have Python installed. Then, install the required packages:
-   ```sh
-   pip install -r requirements.txt
-   ```
-
-2. **Configure the Project**
-   - Create a `config.json` file in the project directory.
-   - Add the following:
-     ```json
-     {
-       "TOKEN": "your-access-token-here",
-       "COURSE_ID": "your-course-id-here"
-     }
-     ```
-
-3. **Run the Project**
-   Execute the script to test functionality or perform tasks:
-   ```sh
-   python GettingStartedWithCanvasAPI_2.py
-   ```
-
 ---
-
-## Resources
-
-Here are helpful links for documentation and learning materials:
-
-1. [Canvas Login | Instructure](https://canvas.instructure.com/)  
-   Use this to log in to your Canvas instance.
-
-2. [Canvas LMS REST API Documentation](https://canvas.instructure.com/doc/api/)  
-   Official API documentation for working with Canvas LMS.
-
-3. [CanvasAPI 3.2.0 Documentation](https://canvasapi.readthedocs.io/)  
-   A Python wrapper for the Canvas API. Use this if you plan to interact with Canvas programmatically.
-
-4. [Find Your Superpower - Learn Programming Using Canvas APIs (YouTube)](https://www.youtube.com/watch?v=6AEzuo7gElM)  
-   A great video resource to understand how to use Canvas APIs effectively.
-
-5. [Canvas APIs: Getting Started - Instructure Community](https://community.canvaslms.com/t5/Canvas-Developers-Group/Canvas-APIs-Getting-started-the-practical-ins-and-outs-gotchas/ba-p/263685)  
-   A community resource for learning the practical ins and outs of using Canvas APIs.
-
----
-
 ## Prerequisites
 
 Before you begin:
@@ -145,6 +99,30 @@ A User Token is required to authenticate API requests.
    Copy the token and save it securely. You’ll need it to authenticate API requests.
 
 ---
+## Set Up the Python Environment
+
+1. **Install Dependencies** 
+   - Open Terminal. Ensure you have Python installed. Then, install the required packages:
+   ```sh
+   pip install -r requirements.txt
+   ```
+
+2. **Configure the Project**
+   - Create a `config.json` file in the project directory.
+   - Add the following:
+     ```json
+     {
+       "TOKEN": "your-access-token-here",
+       "COURSE_ID": "your-course-id-here"
+     }
+     ```
+
+3. **Run the Project**
+   Execute the script to test functionality or perform tasks:
+   ```sh
+   python GettingStartedWithCanvasAPI_2.py
+   ```
+---
 
 ## Using the Canvas API 🚀
 
@@ -169,6 +147,27 @@ course = canvas.get_course(course_id)
 print(f"Course Name: {course.name}")
 print(f"Course Code: {course.course_code}")
 ```
+
+---
+# Resources
+
+Here are helpful links for documentation and learning materials:
+
+1. [Canvas Login | Instructure](https://canvas.instructure.com/)  
+   Use this to log in to your Canvas instance.
+
+2. [Canvas LMS REST API Documentation](https://canvas.instructure.com/doc/api/)  
+   Official API documentation for working with Canvas LMS.
+
+3. [CanvasAPI 3.2.0 Documentation](https://canvasapi.readthedocs.io/)  
+   A Python wrapper for the Canvas API. Use this if you plan to interact with Canvas programmatically.
+
+4. [Find Your Superpower - Learn Programming Using Canvas APIs (YouTube)](https://www.youtube.com/watch?v=6AEzuo7gElM)  
+   A great video resource to understand how to use Canvas APIs effectively.
+
+5. [Canvas APIs: Getting Started - Instructure Community](https://community.canvaslms.com/t5/Canvas-Developers-Group/Canvas-APIs-Getting-started-the-practical-ins-and-outs-gotchas/ba-p/263685)  
+   A community resource for learning the practical ins and outs of using Canvas APIs.
+
 
 ---
 
