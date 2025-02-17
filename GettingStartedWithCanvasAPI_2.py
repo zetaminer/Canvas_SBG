@@ -5,22 +5,43 @@ from canvasapi import Canvas
 
 # Canvas API Configuration
 API_URL = 'https://morenetlab.instructure.com'
-TOKEN = 'YOUR_TOKEN_HERE'
-canvas = Canvas(API_URL, TOKEN)
 ACCOUNT_ID = 1
-COURSE_ID = 000 # find your course id this is a place holder
-DATA_FILE = "canvas_data.json"
+
+# Global Variables (Initialized in `initialize_canvas()`)
+TOKEN = None
+COURSE_ID = None
+canvas = None
+
+DATA_FILE = "canvas_data.json" # stores the student id and quiz ids so that they can be easily removed
 DEFAULT_PASSWORD = "Pass123!"
 
 
 # ==================== Utility Functions ==================== #
 
 
+def initialize_canvas():
+    """Loads the API token and course ID from config.json, then initializes the Canvas object."""
+    global TOKEN, COURSE_ID, canvas  # Declare global variables
 
-def load_token():
-    with open("config.json", "r") as file:
-        config = json.load(file)
-    return config["TOKEN"], config["COURSE_ID"]
+    try:
+        with open("config.json", "r") as file:
+            config = json.load(file)
+            TOKEN = config.get("TOKEN")
+            COURSE_ID = config.get("COURSE_ID")
+
+        if not TOKEN or not COURSE_ID:
+            raise ValueError("Missing TOKEN or COURSE_ID in config.json")
+
+        # Initialize Canvas API instance
+        canvas = Canvas(API_URL, TOKEN)
+        print("Canvas API initialized successfully.")
+
+    except FileNotFoundError:
+        print("Error: config.json not found.")
+    except ValueError as ve:
+        print(f"Error: {ve}")
+    except Exception as e:
+        print(f"Unexpected error: {e}")
 
 
 def save_data_to_file(data):
@@ -264,8 +285,8 @@ def check_URL_Response():
 # ==================== Example Usage ==================== #
 
 if __name__ == "__main__":
-    TOKEN, COURSE_ID = load_token()  # load token, and course id from private json, if you hard code it you can remove this line
 
+    initialize_canvas() # Call the function at the start of the script to ensure global values are set
     # Create and enroll students, then accept invites
     # create_test_students()
     # enroll_students_to_course(COURSE_ID)
@@ -274,4 +295,4 @@ if __name__ == "__main__":
     # create_quiz_from_json(COURSE_ID, "Test Quiz")
 
     # Uncomment to remove test students
-    # remove_students_from_lab()
+    remove_students_from_lab()

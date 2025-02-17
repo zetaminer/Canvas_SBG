@@ -54,7 +54,7 @@ Follow these steps to download the project and get started:
 
 Before you begin:
 - Access to a Canvas LMS account.
-- Admin or API access (if needed).
+- Admin or API access.
 - Basic knowledge of REST APIs.
 
 ---
