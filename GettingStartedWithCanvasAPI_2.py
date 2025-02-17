@@ -1,5 +1,6 @@
 import requests
 import json
+import re
 import random
 from canvasapi import Canvas
 
@@ -18,8 +19,7 @@ DATA_FILE = "canvas_data.json" # stores the student id and quiz ids so that they
 DEFAULT_PASSWORD = "Pass123!"
 
 
-# ==================== Utility Functions ==================== #
-
+#region ==================== Utility Functions ==================== #
 
 def initialize_canvas():
     """Loads the API token and course ID from config.json, then initializes the Canvas object."""
@@ -60,8 +60,32 @@ def load_data_from_file():
     except FileNotFoundError:
         return {"students": [], "quizzes": []}
 
+#endregion
 
-# ==================== Canvas API Functions ==================== #
+#region ==================== Debugging & Testing Functions ==================== #
+
+def test_get_courses():
+    """Fetches and prints available courses."""
+    courses = canvas.get_courses()
+    print("Available Courses:")
+    for course in courses:
+        print(f"- {course.name} (ID: {course.id})")
+
+
+def check_account_id():
+    """Lists available accounts under the authenticated user."""
+    accounts = canvas.get_accounts()
+    for account in accounts:
+        print(f"Account ID: {account.id} - Name: {account.name}")
+
+
+def check_URL_Response():
+    """Checks if the Canvas API URL is reachable."""
+    response = requests.get(API_URL)
+    print(f"API Response: {response.status_code}")
+#endregion
+
+#region ==================  Test Student Functions ==================== #
 
 def create_test_students():
     """Creates 3 test students and saves their details for later use."""
@@ -162,9 +186,9 @@ def remove_students_from_lab():
     # Clear student data from file
     data["students"] = []
     save_data_to_file(data)
+#endregion
 
-
-# ==================== Quiz Functions ==================== #
+#region ==================== Sample Quiz Completion Functions ==================== #
 
 def create_quiz_from_json(course_id, quiz_title, json_file='quiz_data.json'):
     """Creates a quiz in a Canvas course using data from a JSON file and saves quiz info."""
@@ -397,7 +421,6 @@ def submit_quiz(course_id, quiz_id, quiz_submission_id, student_id):
     else:
         print(f"❌ Failed to submit quiz for Student {student_id}: {response.status_code} - {response.text}")
 
-
 def complete_quiz_for_students_OLD(course_id, quiz_id, correct_answers_map):
     """
     Masquerades as each student and completes the quiz.
@@ -526,7 +549,6 @@ def complete_quiz_submission(course_id, quiz_id, submission, student_id, access_
         print(f"❌ Failed to submit quiz for Student {student_id}: {response.status_code} - {response.text}")
         return None
 
-
 def submit_answers_masquerading(course_id, quiz_id, quiz_submission_id, student_id, answers, attempt, validation_token,
                                 student_token):
     """
@@ -565,7 +587,6 @@ def submit_answers_masquerading(course_id, quiz_id, quiz_submission_id, student_
     else:
         print(
             f"❌ Masquerade Failed to submit answers for Student {student_id}: {response.status_code} - {response.text}")
-
 
 def complete_quiz_submission(course_id, quiz_id, submission, student_id, student_token, access_code=None):
     """
@@ -610,29 +631,101 @@ def complete_quiz_submission(course_id, quiz_id, submission, student_id, student
     else:
         print(f"❌ Failed to submit quiz for Student {student_id}: {response.status_code} - {response.text}")
         return None
+#endregion
+
+#region ==================== Quiz Grade Mapping Functions ==================== #
+import re
+import json
 
 
-# ==================== Debugging & Testing Functions ==================== #
-
-def test_get_courses():
-    """Fetches and prints available courses."""
-    courses = canvas.get_courses()
-    print("Available Courses:")
-    for course in courses:
-        print(f"- {course.name} (ID: {course.id})")
-
-
-def check_account_id():
-    """Lists available accounts under the authenticated user."""
-    accounts = canvas.get_accounts()
-    for account in accounts:
-        print(f"Account ID: {account.id} - Name: {account.name}")
+def remove_existing_mapping_data(description):
+    """
+    Removes any existing mapping data block from the quiz description.
+    Assumes the block is enclosed in a div with style 'color: lightgrey;'
+    and contains the markers MAPPING_DATA_START and MAPPING_DATA_END.
+    """
+    pattern = r"<div\s+style=['\"]color:\s*lightgrey;['\"]>.*?MAPPING_DATA_END\s*</div>"
+    cleaned = re.sub(pattern, "", description, flags=re.DOTALL | re.IGNORECASE)
+    return cleaned.strip()
 
 
-def check_URL_Response():
-    """Checks if the Canvas API URL is reachable."""
-    response = requests.get(API_URL)
-    print(f"API Response: {response.status_code}")
+def append_mapping_to_quiz_description(course_id, quiz_id, mapping_data):
+    """
+    Appends a JSON representation of mapping_data to the quiz description.
+    It uses the quiz’s title as the key and wraps the JSON in a div with light grey text.
+    Before appending, it removes any existing mapping block.
+    """
+    try:
+        course_obj = canvas.get_course(course_id)
+        quiz_obj = course_obj.get_quiz(quiz_id)
+
+        # Remove any existing mapping data
+        current_description = remove_existing_mapping_data(quiz_obj.description or "")
+
+        # Create a new mapping dictionary with the quiz title as key
+        new_mapping = {quiz_obj.title: mapping_data}
+        mapping_json = json.dumps(new_mapping)
+
+        # Append the new mapping block using plain text markers
+        new_block = (
+            "\n\n<div style='color: lightgrey;'>\n"
+            "MAPPING_DATA_START\n"
+            f"{mapping_json}\n"
+            "MAPPING_DATA_END\n"
+            "</div>"
+        )
+
+        new_description = current_description + new_block
+
+        updated_quiz = quiz_obj.edit(quiz={"description": new_description})
+        print("Quiz description updated with new mapping data.")
+        return updated_quiz
+
+    except Exception as e:
+        print(f"Failed to append mapping data to quiz description: {e}")
+        return None
+
+
+def extract_mapping_from_description(description):
+    """
+    Extracts mapping data from a quiz description that contains the plain text markers.
+    """
+    pattern = r"MAPPING_DATA_START\s*(.*?)\s*MAPPING_DATA_END"
+    match = re.search(pattern, description, re.DOTALL | re.IGNORECASE)
+    if match:
+        mapping_json = match.group(1).strip()
+        try:
+            mapping_data = json.loads(mapping_json)
+            return mapping_data
+        except Exception as e:
+            print(f"Error parsing mapping data: {e}")
+            return None
+    else:
+        print("No mapping data markers found in description.")
+        return None
+
+
+def get_quiz_mapping(course_id, quiz_id):
+    """
+    Retrieves the quiz description and extracts the mapping data.
+    """
+    try:
+        course_obj = canvas.get_course(course_id)
+        quiz_obj = course_obj.get_quiz(quiz_id)
+        description = quiz_obj.description or ""
+        print("Full quiz description:")
+        print(description)
+        mapping_data = extract_mapping_from_description(description)
+        if mapping_data:
+            print(f"✅ Retrieved mapping data: {mapping_data}")
+        else:
+            print("❌ No mapping data found in quiz description.")
+        return mapping_data
+    except Exception as e:
+        print(f"Error retrieving quiz mapping: {e}")
+        return None
+
+
 
 
 # ==================== Example Usage ==================== #
@@ -644,17 +737,27 @@ if __name__ == "__main__":
     # Create and enroll students, then accept invites
     # create_test_students()
     # enroll_students_to_course(COURSE_ID)
+    # remove_students_from_lab()
 
     # Create a quiz and save details
     # create_quiz_from_json(COURSE_ID, "Test Quiz 5")
+    # complete_quiz_for_students(course_id = COURSE_ID,quiz_id=806, correct_answers_map=correct_answers_map)
 
     correct_answers_map = {
-        0: [1, 3],  # First student answers Q1, Q3 correctly
-        1: [2, 4],  # Second student answers Q2, Q4 correctly
-        2: [5, 6]  # Third student answers Q5, Q6 correctly
+        0: [1,2,3,4,5,6],  # First student answers Q1 - Q6 correctly
+        1: [1,2,3,4,5,6,7,8],  # Second student answers Q1 - Q8 correctly
+        2: [1,2,3,4,5,6,7,8,9,10]  # Third student answers Q1 - Q10 correctly
+    }
+    # Example usage:
+    mapping_data = {
+        "quiz_4_mapping_data": {
+            "5/10": "75%",
+            "6/10": "80%",
+            "7/10": "85%"
+        }
     }
 
-    complete_quiz_for_students(course_id = COURSE_ID,quiz_id=809, correct_answers_map=correct_answers_map)
 
-    # Uncomment to remove test students
-    # remove_students_from_lab()
+    updated_quiz = append_mapping_to_quiz_description(COURSE_ID, 808, mapping_data)
+    # mapping = get_quiz_mapping(COURSE_ID, 808)
+
