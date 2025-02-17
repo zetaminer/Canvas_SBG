@@ -5,6 +5,7 @@ from canvasapi import Canvas
 
 # Canvas API Configuration
 API_URL = 'https://morenetlab.instructure.com'
+
 ACCOUNT_ID = 1
 
 # Global Variables (Initialized in `initialize_canvas()`)
@@ -256,6 +257,34 @@ def check_quiz_type(course_id, quiz_id):
     else:
         print("Could not determine quiz type.")
 
+def get_quiz_answer_key(course_id, quiz_id):
+    """
+    Retrieve the correct answers for all quiz questions (requires instructor/admin token).
+    """
+    try:
+        course = canvas.get_course(course_id)
+        quiz = course.get_quiz(quiz_id)
+        questions = quiz.get_questions()
+
+        answer_key = {}
+
+        for question in questions:
+            question_id = question.id
+            possible_answers = question.answers  # List of answer choices
+
+            # Find the correct answer (weight = 100)
+            correct_answer = next((ans for ans in possible_answers if ans.get("weight", 0) == 100), None)
+
+            if correct_answer:
+                answer_key[question_id] = correct_answer["id"]  # Store the correct answer ID
+
+        print(f"✅ Retrieved answer key for Quiz {quiz_id}: {answer_key}")
+        return answer_key
+
+    except Exception as e:
+        print(f"❌ Failed to get answer key for Quiz {quiz_id}: {e}")
+        return None
+
 def get_quiz(quiz_id, student_id):
     """Retrieve quiz details while masquerading as a student."""
     url = f"{API_URL}/courses/{COURSE_ID}/quizzes/{quiz_id}?as_user_id={student_id}"
@@ -290,53 +319,51 @@ def start_quiz(course_id, quiz_id, student_id):
         print(f"❌ Failed to start quiz for Student {student_id}: {e}")
         return None
 
-def answer_quiz_questions(course_id, quiz_id, quiz_submission, student_id, correct_answers):
+def answer_quiz_questions(course_id, quiz_id, quiz_submission_id, student_id, answer_key, correct_questions):
     """
-    Answer quiz questions using the given correct answers dictionary.
-
-    :param course_id: The ID of the course.
-    :param quiz_id: The ID of the quiz.
-    :param quiz_submission: The QuizSubmission object.
-    :param student_id: The ID of the student.
-    :param correct_answers: Dictionary mapping question numbers to correct answers.
+    Answer quiz questions using the instructor-provided answer key.
     """
     try:
+        course = canvas.get_course(course_id)
+        quiz = course.get_quiz(quiz_id)
+
+        # ✅ Directly get submission instead of searching
+        quiz_submission = quiz.get_quiz_submission(quiz_submission_id)
+
+        if not quiz_submission:
+            print(f"⚠️ Could not find submission {quiz_submission_id} for Student {student_id}.")
+            return
+
         questions = quiz_submission.get_submission_questions()
         answers = []
 
         for i, question in enumerate(questions, start=1):
             question_id = question.id
-            possible_answers = question.answers  # List of answer choices
+            possible_answers = question.answers
 
-            print(f"🔍 Debug: Question {i} Answers: {possible_answers}")  # Debugging
+            print(f"🔍 Debug: Question {i} Answers: {possible_answers}")
 
-            # Check for available keys
             if not possible_answers:
                 print(f"⚠️ No answer choices found for Question {i}")
                 continue
 
-            # Select the correct answer if specified, otherwise pick an incorrect one
-            correct_answer = None
-
-            if i in correct_answers:
-                # Look for "is_correct" field
-                correct_answer = next((ans for ans in possible_answers if ans.get("is_correct")), None)
+            # Determine if student should answer correctly
+            if i in correct_questions:
+                correct_answer_id = answer_key.get(question_id)  # Get correct answer ID
             else:
-                # Choose any available incorrect answer
-                correct_answer = next((ans for ans in possible_answers if not ans.get("is_correct", False)), None)
+                incorrect_answers = [ans["id"] for ans in possible_answers if ans["id"] != answer_key.get(question_id)]
+                correct_answer_id = incorrect_answers[0] if incorrect_answers else possible_answers[0]["id"]
 
-            if correct_answer:
-                answers.append({"id": question_id, "answer": correct_answer["id"]})
-            else:
-                print(f"⚠️ No valid answer found for Question {i}")
+            answers.append({"id": question_id, "answer": correct_answer_id})
 
         if answers:
-            quiz_submission.answer_submission_questions(quiz_answers=answers)
-            print(f"✅ Answers submitted for Student {student_id}")
+            print(f"📤 Sending answers for Student {student_id}: {answers}")
+
+            response = quiz_submission.answer_submission_questions(quiz_answers=answers)
+            print(f"✅ Answers submitted for Student {student_id}, Response: {response}")
 
     except Exception as e:
         print(f"❌ Failed to submit answers for Student {student_id}: {e}")
-
 
 def submit_quiz(course_id, quiz_id, quiz_submission, student_id):
     """
@@ -353,35 +380,113 @@ def submit_quiz(course_id, quiz_id, quiz_submission, student_id):
     except Exception as e:
         print(f"❌ Failed to submit quiz for Student {student_id}: {e}")
 
-def complete_quiz_for_students(course_id, quiz_id, correct_answers_map):
+def complete_quiz_for_students_OLD(course_id, quiz_id, correct_answers_map):
     """
     Masquerades as each student and completes the quiz.
-
-    :param course_id: The ID of the course.
-    :param quiz_id: The ID of the quiz.
-    :param correct_answers_map: Dictionary mapping student index to questions they should answer correctly.
     """
     data = load_data_from_file()
     students = data["students"]
+
+    # Retrieve the correct answer key (requires instructor/admin token)
+    answer_key = get_quiz_answer_key(course_id, quiz_id)
+    if not answer_key:
+        print("❌ Failed to retrieve answer key. Exiting.")
+        return
 
     for index, student in enumerate(students):
         student_id = student["id"]
         print(f"\n🚀 Masquerading as {student['name']} (ID: {student_id}) to take quiz {quiz_id}...")
 
-        # Start the quiz
-        submission = start_quiz(course_id, quiz_id, student_id)
-        if not submission:
+        # Start the quiz and get the correct submission ID
+        quiz_submission_id = start_quiz(course_id, quiz_id, student_id)
+        if not quiz_submission_id:
             continue
 
-        # Submit answers
+        # Submit answers using the correct answer key
         correct_questions = correct_answers_map.get(index, [])
-        answer_quiz_questions(course_id, quiz_id, submission, student_id, correct_questions)
+        answer_quiz_questions(course_id, quiz_id, quiz_submission_id, student_id, answer_key, correct_questions)
 
         # Submit quiz
-        submit_quiz(course_id, quiz_id, submission, student_id)
+        submit_quiz(course_id, quiz_id, quiz_submission_id, student_id)
 
         print(f"✅ Quiz {quiz_id} completed for {student['name']}\n")
 
+def complete_quiz_for_students(course_id, quiz_id, correct_answers_map):
+    """
+    Masquerades as each student and completes the quiz.
+    """
+    data = load_data_from_file()
+    students = data["students"]
+
+    # Retrieve the correct answer key (requires instructor/admin token)
+    answer_key = get_quiz_answer_key(course_id, quiz_id)
+    if not answer_key:
+        print("❌ Failed to retrieve answer key. Exiting.")
+        return
+
+    for index, student in enumerate(students):
+        student_id = student["id"]
+        print(f"\n🚀 Masquerading as {student['name']} (ID: {student_id}) to take quiz {quiz_id}...")
+
+        # Start the quiz and get the correct submission ID
+        quiz_submission_id = start_quiz(course_id, quiz_id, student_id)
+        if not quiz_submission_id:
+            continue
+
+        # Prepare answers (only correct answers if specified)
+        correct_questions = correct_answers_map.get(index, [])
+        student_answers = {
+            q_id: answer_key[q_id] if q_id in correct_questions else random.choice(list(answer_key.values()))
+            for q_id in answer_key
+        }
+
+        # Submit answers using masquerading
+        submit_answers_masquerading(course_id, quiz_id, quiz_submission_id, student_id, student_answers, TOKEN)
+
+        # Submit quiz
+        submit_quiz(course_id, quiz_id, quiz_submission_id, student_id)
+
+        print(f"✅ Quiz {quiz_id} completed for {student['name']}\n")
+
+def submit_answers_masquerading(course_id, quiz_id, quiz_submission_id, student_id, answers, admin_token):
+    """
+    Submit answers to a Canvas Quiz while masquerading as a student.
+
+    :param course_id: The course ID
+    :param quiz_id: The quiz ID
+    :param quiz_submission_id: The student's quiz submission ID
+    :param student_id: The student's ID (for masquerading)
+    :param answers: A dictionary of question_id -> selected_answer_id
+    :param admin_token: Your admin API token
+    """
+
+    # 🔹 Canvas API endpoint for submitting quiz answers (using API_URL dynamically)
+    url = f"{API_URL}/api/v1/quiz_submissions/{quiz_submission_id}/questions"
+
+    # 🔹 Authentication headers
+    headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json"
+    }
+
+    # 🔹 Format request payload correctly
+    payload = {
+        "quiz_questions": [
+            {"id": question_id, "answer": answer_id}
+            for question_id, answer_id in answers.items()
+        ]
+    }
+
+    # 🔹 Make the request with masquerading
+    params = {"as_user_id": student_id}
+
+    response = requests.post(url, json=payload, headers=headers, params=params)
+
+    # 🔹 Handle response
+    if response.status_code == 200:
+        print(f"✅ Successfully submitted answers for Student {student_id}")
+    else:
+        print(f"❌ Failed to submit answers for Student {student_id}: {response.status_code} - {response.text}")
 
 
 # ==================== Debugging & Testing Functions ==================== #
@@ -418,7 +523,7 @@ if __name__ == "__main__":
     # enroll_students_to_course(COURSE_ID)
 
     # Create a quiz and save details
-    # create_quiz_from_json(COURSE_ID, "Test Quiz 3")
+    # create_quiz_from_json(COURSE_ID, "Test Quiz 4")
 
     correct_answers_map = {
         0: [1, 3],  # First student answers Q1, Q3 correctly
@@ -426,7 +531,7 @@ if __name__ == "__main__":
         2: [5, 6]  # Third student answers Q5, Q6 correctly
     }
 
-    complete_quiz_for_students(course_id = COURSE_ID,quiz_id=807, correct_answers_map=correct_answers_map)
+    complete_quiz_for_students(course_id = COURSE_ID,quiz_id=808, correct_answers_map=correct_answers_map)
 
     # Uncomment to remove test students
     # remove_students_from_lab()

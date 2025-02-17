@@ -24,6 +24,11 @@
             "id": 807,
             "title": "Test Quiz 3",
             "course_id": 515
+        },
+        {
+            "id": 808,
+            "title": "Test Quiz 4",
+            "course_id": 515
         }
     ]
 }
