@@ -3,6 +3,9 @@ import json
 import re
 import random
 from canvasapi import Canvas
+from canvasapi.custom_gradebook_columns import CustomGradebookColumn
+from canvasapi.custom_gradebook_columns import ColumnData
+import time
 
 # Canvas API Configuration
 API_URL = 'https://morenetlab.instructure.com'
@@ -634,20 +637,16 @@ def complete_quiz_submission(course_id, quiz_id, submission, student_id, student
 #endregion
 
 #region ==================== Quiz Grade Mapping Functions ==================== #
-import re
-import json
-
 
 def remove_existing_mapping_data(description):
     """
     Removes any existing mapping data block from the quiz description.
-    Assumes the block is enclosed in a div with style 'color: lightgrey;'
+    Assumes the block is enclosed in a div
     and contains the markers MAPPING_DATA_START and MAPPING_DATA_END.
     """
-    pattern = r"<div\s+style=['\"]color:\s*grey;['\"]>.*?MAPPING_DATA_END\s*</div>"
+    pattern = r"<div(?:\s+style=['\"][^'\"]*['\"])?>.*?MAPPING_DATA_END\s*</div>"
     cleaned = re.sub(pattern, "", description, flags=re.DOTALL | re.IGNORECASE)
     return cleaned.strip()
-
 
 def append_mapping_to_quiz_description(course_id, quiz_id, mapping_data):
     """
@@ -685,7 +684,6 @@ def append_mapping_to_quiz_description(course_id, quiz_id, mapping_data):
         print(f"Failed to append mapping data to quiz description: {e}")
         return None
 
-
 def extract_mapping_from_description(description):
     """
     Extracts mapping data from a quiz description that contains the plain text markers.
@@ -703,7 +701,6 @@ def extract_mapping_from_description(description):
     else:
         print("No mapping data markers found in description.")
         return None
-
 
 def get_quiz_mapping(course_id, quiz_id):
     """
@@ -724,6 +721,396 @@ def get_quiz_mapping(course_id, quiz_id):
     except Exception as e:
         print(f"Error retrieving quiz mapping: {e}")
         return None
+
+def update_all_submission_grades(course_id, quiz_id, mapping_data):
+    """
+    For a given quiz, update every student's submission grade based on the custom mapping.
+
+    mapping_data should be a dictionary like:
+    {
+        "quiz_4_mapping_data": {
+            "4": "75%",
+            "5": "75%",
+            "6": "80%",
+            "7": "85%",
+            "8": "90%",
+            "9": "90%",
+            "10": "100%"
+        }
+    }
+
+    The function:
+      1. Retrieves the quiz object.
+      2. Gets all quiz submissions.
+      3. For each submission:
+           - Reads the raw score (the number of points the student got correct).
+           - Converts that score to a string to look it up in the mapping.
+           - If a mapping exists for that raw score, converts the percentage string to a float.
+           - Computes the new score as (mapped_percentage / 100) * points_possible.
+           - Updates the submission using canvasapi’s update_score_and_comments().
+    """
+    try:
+        course_obj = canvas.get_course(course_id)
+        quiz_obj = course_obj.get_quiz(quiz_id)
+        submissions = quiz_obj.get_submissions()  # PaginatedList of QuizSubmission objects
+
+        # Extract the mapping data; here we assume it's stored under the key "quiz_4_mapping_data"
+        mapping = mapping_data.get("quiz_4_mapping_data")
+        if not mapping:
+            print("No mapping found under key 'quiz_4_mapping_data'.")
+            return
+
+        for submission in submissions:
+            # Retrieve the raw score (number of points correct)
+            raw_score = submission.score
+            if raw_score is None:
+                print(f"Submission {submission.id} has no raw score; skipping.")
+                continue
+
+            # Convert the raw score to an integer string key (e.g., 5 -> "5")
+            raw_score_str = str(int(raw_score))
+            if raw_score_str not in mapping:
+                print(f"No mapping rule found for raw score '{raw_score_str}' in submission {submission.id}; skipping.")
+                continue
+
+            mapped_percent_str = mapping[raw_score_str]
+            try:
+                mapped_percent = float(mapped_percent_str.strip("%"))
+            except Exception as e:
+                print(f"Error converting mapped percentage for submission {submission.id}: {e}")
+                continue
+
+            # Get total points for the quiz; note the correct attribute is points_possible
+            points_possible = quiz_obj.points_possible
+            new_score = (mapped_percent / 100.0) * points_possible
+
+            try:
+                # Update the submission using canvasapi's update_score_and_comments
+                updated_submission = submission.update_score_and_comments(score=new_score)
+                print(
+                    f"✅ Updated submission {submission.id}: raw score {raw_score_str} -> new score {new_score} ({mapped_percent}%)")
+            except Exception as e:
+                print(f"❌ Failed to update submission {submission.id}: {e}")
+    except Exception as e:
+        print(f"Failed to update all submission grades: {e}")
+def get_or_create_custom_grade_column(course_obj, title="Mapped Percent"):
+    """
+    Retrieves a custom gradebook column by title. If it doesn't exist, creates it.
+    Returns a GradebookColumn object.
+    """
+    print(f"🔍 DEBUG: get_or_create_custom_grade_column() called for '{title}'")
+
+    # Get the list of custom gradebook columns
+    try:
+        custom_columns = course_obj.get_custom_columns()
+        for col in custom_columns:
+            if col.title == title:
+                print(f"✅ Found custom grade column '{title}' (ID: {col.id})")
+                return col
+    except Exception as e:
+        print(f"❌ Error retrieving custom grade columns: {e}")
+        return None
+
+    # If not found, create a new one:
+    try:
+        print(f"⚠️ Creating new grade column '{title}'...")
+        new_col = course_obj.create_custom_column(
+            column={"title": title, "hidden": False, "position": 1, "description": "Mapped percent grades"}
+        )
+        print(f"✅ Created custom grade column '{title}' (ID: {new_col.id})")
+        return new_col
+    except Exception as e:
+        print(f"❌ Error creating custom grade column: {e}")
+        return None
+
+def update_all_submission_custom_grades(course_id, quiz_id, mapping_data):
+    """
+    For a given quiz, updates a custom gradebook column (e.g. 'Mapped Percent')
+    for every student based on the mapping_data.
+
+    mapping_data should be in the form:
+    {
+       "quiz_4_mapping_data": {
+          "4": "75%",
+          "5": "75%",
+          "6": "80%",
+          "7": "85%",
+          "8": "90%",
+          "9": "90%",
+          "10": "100%"
+       }
+    }
+    The raw score (converted to string) is used as a key.
+    """
+    try:
+        course_obj = canvas.get_course(course_id)
+        quiz_obj = course_obj.get_quiz(quiz_id)
+        submissions = quiz_obj.get_submissions()  # returns a PaginatedList of QuizSubmission objects
+
+        # Assume the mapping data is stored under a key such as "quiz_4_mapping_data"
+        mapping = mapping_data.get("quiz_4_mapping_data")
+        if not mapping:
+            print("No mapping found under key 'quiz_4_mapping_data'.")
+            return
+
+        # Get (or create) the custom grade column for mapped percent scores
+        custom_column = get_or_create_custom_grade_column(course_obj, title="Mapped Percent")
+        if not custom_column:
+            print("Could not get or create custom grade column.")
+            return
+
+        for submission in submissions:
+            # submission.score is the raw score (points correct)
+            raw_score = submission.score
+            if raw_score is None:
+                print(f"Submission {submission.id} has no raw score; skipping.")
+                continue
+
+            raw_score_str = str(int(raw_score))
+            if raw_score_str not in mapping:
+                print(f"No mapping rule found for raw score '{raw_score_str}' in submission {submission.id}; skipping.")
+                continue
+
+            mapped_percent = mapping[raw_score_str]
+            # Here, you might choose to store the mapped percent as a string or convert it to a number.
+            # We update the custom grade column for this student.
+            try:
+                # update_column_data expects a string for the column_data
+                updated = custom_column.update_column_data(column_data=mapped_percent, user_id=submission.user_id)
+                print(f"✅ Updated submission for Student {submission.user_id}: raw score {raw_score_str} -> mapped {mapped_percent}")
+            except Exception as e:
+                print(f"❌ Failed to update submission {submission.id} for Student {submission.user_id}: {e}")
+    except Exception as e:
+        print(f"Failed to update all submission grades: {e}")
+
+#endregion
+
+
+def get_custom_gradebook_columns(course):
+    """
+    Retrieve custom gradebook columns for a course using the Canvas instance's _requester.
+    """
+    url = f"/api/v1/courses/{course.id}/custom_gradebook_columns"
+    response = canvas.get_course(course.id).get_custom_gradebook_columns()
+
+    if response.status_code == 200:
+        columns = response.json().get("custom_gradebook_columns", [])
+        return [CustomGradebookColumn(canvas._requester, col) for col in columns]
+    else:
+        print(f"Failed to get custom gradebook columns: {response.status_code} - {response.text}")
+        return []
+
+def create_custom_gradebook_column(course, title, hidden=False):
+    """
+    Creates a new custom gradebook column for the course.
+    """
+    url = f"/api/v1/courses/{course.id}/custom_gradebook_columns"
+    payload = {
+        "column": {
+            "title": title,
+            "hidden": hidden
+        }
+    }
+    response = canvas._requester.request("POST", url, json=payload)
+    if response.status_code == 200:
+        new_col = CustomGradebookColumn(canvas._requester, response.json())
+        print(f"✅ Created custom gradebook column '{title}'")
+        return new_col
+    else:
+        print(f"❌ Failed to create custom gradebook column '{title}': {response.status_code} - {response.text}")
+        return None
+
+
+def delete_custom_column_raw(course_id, column_id):
+    """
+    Deletes a custom gradebook column using the raw Canvas API.
+
+    :param course_id: Canvas course ID
+    :param column_id: ID of the custom gradebook column to delete
+    """
+    url = f"{API_URL}/api/v1/courses/{course_id}/custom_gradebook_columns/{column_id}"
+    headers = {"Authorization": f"Bearer {TOKEN}"}
+
+    response = requests.delete(url, headers=headers)
+
+    if response.status_code == 200:
+        print(f"✅ Successfully deleted custom column {column_id} via raw API.")
+    else:
+        print(f"❌ Failed to delete custom column {column_id}: {response.status_code} - {response.text}")
+
+
+def delete_custom_column(course_id, column_id):
+    """
+    Deletes a custom gradebook column in Canvas.
+
+    :param course_id: Canvas course ID
+    :param column_id: ID of the custom gradebook column to delete
+    """
+    try:
+        course = canvas.get_course(course_id)
+        column = course.get_custom_column(column_id)
+        column.delete()
+        print(f"✅ Successfully deleted custom column {column_id} in course {course_id}.")
+    except Exception as e:
+        print(f"❌ Failed to delete custom column {column_id}: {e}")
+
+
+# Example Usage:
+delete_custom_column(course_id=1234, column_id=5678)
+
+
+def update_gradebook_column_for_quiz(course_id, quiz_id, mapping_data):
+    """
+    Updates a custom gradebook column for a quiz and assigns student grades.
+    """
+    try:
+        print(f"🔍 DEBUG: update_gradebook_column_for_quiz() called for quiz {quiz_id}")
+
+        course_obj = canvas.get_course(course_id)
+        quiz_obj = course_obj.get_quiz(quiz_id)
+
+        column_title = f"{quiz_obj.title} %"
+        print(f"🔍 Looking for column: {column_title}")
+
+        # Get or create the custom gradebook column
+        custom_column = get_or_create_custom_grade_column(course_obj, title=column_title)
+
+        if not custom_column:
+            print("❌ Could not get or create custom gradebook column.")
+            return
+
+        # Get all quiz submissions
+        submissions = quiz_obj.get_submissions()
+        print(f"✅ Found {len(list(submissions))} submissions for quiz {quiz_id}")
+
+        # Load the mapping data for grade conversion
+        mapping = mapping_data.get("quiz_4_mapping_data")
+        if not mapping:
+            print("❌ No mapping found under key 'quiz_4_mapping_data'.")
+            return
+
+        # Retrieve existing column entries
+        column_entries = {entry.user_id: entry for entry in custom_column.get_column_entries()}
+
+        # Debug: Check if users are enrolled
+        enrollments = course_obj.get_enrollments()
+        enrolled_users = {e.user_id for e in enrollments}
+
+        # Update each student's grade
+        for submission in submissions:
+            user_id = submission.user_id
+            if user_id not in enrolled_users:
+                print(f"⚠️ Skipping user {user_id}: Not enrolled in the course.")
+                continue
+
+            raw_score = submission.score
+            if raw_score is None:
+                print(f"⚠️ Submission {submission.id} has no raw score; skipping.")
+                continue
+
+            raw_score_str = str(int(raw_score))
+            if raw_score_str not in mapping:
+                print(f"⚠️ No mapping rule found for raw score '{raw_score_str}' in submission {submission.id}; skipping.")
+                continue
+
+            new_value = mapping[raw_score_str]  # e.g., "80%"
+            time.sleep(1)  # Wait 1 second between requests
+            try:
+                # ✅ Manually update the gradebook column using direct API request
+                url = f"{API_URL}/api/v1/courses/{course_id}/custom_gradebook_columns/{custom_column.id}/data/{user_id}"
+                headers = {
+                    "Authorization": f"Bearer {TOKEN}",
+                    "Content-Type": "application/json"
+                }
+                payload = {"column_data": str(new_value)}
+
+                response = requests.put(url, headers=headers, json=payload)
+                time.sleep(1)  # Wait 1 second between requests
+
+                if response.status_code == 200:
+                    print(f"✅ Successfully updated column for user {user_id} (submission {submission.id}) to '{new_value}'")
+                else:
+                    print(f"❌ Failed to update column for user {user_id}: {response.status_code} - {response.text}")
+
+            except Exception as e:
+                print(f"❌ Failed to update column for submission {submission.id}: {e}")
+
+    except Exception as e:
+        print(f"❌ Failed to update gradebook column for quiz {quiz_id}: {e}")
+
+
+def update_quiz_grades(course_id, quiz_id, mapping_data):
+    """
+    Updates students' overall quiz grades using the mapped raw scores.
+    """
+    # Extract actual quiz score-to-percentage mapping
+    score_mapping = mapping_data.get("quiz_4_mapping_data", {})
+
+    # Initialize CanvasAPI course and assignment objects
+    course = canvas.get_course(course_id)
+    assignment = course.get_assignment(quiz_id)
+
+    # Retrieve all submissions
+    submissions = assignment.get_submissions()
+    print(f"✅ Found {len(list(submissions))} submissions for quiz {quiz_id}")
+
+    # Prepare grade mapping dictionary
+    grade_mapping = {}
+
+    for submission in submissions:
+        raw_score = submission.score  # The student's raw quiz score
+        user_id = submission.user_id  # The student's user ID
+
+        # Convert raw score to string (since keys in mapping are strings)
+        raw_score_str = str(int(raw_score)) if raw_score is not None else None
+
+        # Map raw score to percentage, if available
+        if raw_score_str in score_mapping:
+            grade_mapping[user_id] = score_mapping[raw_score_str]
+            print(f"🎯 User {user_id} - Raw Score: {raw_score} → Mapped Grade: {score_mapping[raw_score_str]}")
+        else:
+            print(f"⚠️ No mapping found for User {user_id} with raw score {raw_score}")
+
+    # **Raw API Call to Update Grades**
+    url = f"{API_URL}/api/v1/courses/{course_id}/assignments/{quiz_id}/submissions/update_grades"
+    headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+
+    payload = {
+        "grade_data": {
+            str(user_id): {"posted_grade": str(grade)}
+            for user_id, grade in grade_mapping.items()
+        }
+    }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+
+        if response.status_code == 200:
+            print(f"✅ Successfully updated grades for quiz {quiz_id} via raw API.")
+        else:
+            print(f"❌ Raw API update failed: {response.status_code} - {response.text}")
+
+    except Exception as e:
+        print(f"❌ Raw API request error: {e}")
+
+    # **CanvasAPI Method to Update Individual Submissions (if needed)**
+    try:
+        for user_id, grade in grade_mapping.items():
+            submission = assignment.get_submission(user_id)
+            submission.edit(submission={"posted_grade": str(grade)})
+            print(f"✅ Updated grade for User {user_id} via CanvasAPI.")
+
+    except Exception as e:
+        print(f"❌ CanvasAPI update error: {e}")
+
+
+
+
+
+
+
+
+
 
 
 
@@ -751,6 +1138,7 @@ if __name__ == "__main__":
     # Example usage:
     mapping_data = {
         "quiz_4_mapping_data": {
+            "4": "75%",
             "5": "75%",
             "6": "80%",
             "7": "85%",
@@ -763,5 +1151,15 @@ if __name__ == "__main__":
 
     # updated_quiz = append_mapping_to_quiz_description(COURSE_ID, 808, mapping_data)
     mapping = get_quiz_mapping(COURSE_ID, 808)
-    print(mapping)
+    # print(mapping, type(mapping))
+    # update_gradebook_column_for_quiz(COURSE_ID, 808, mapping)
+    # update_quiz_grades(COURSE_ID, 2883, mapping)
 
+    # course = canvas.get_course(COURSE_ID)
+    # # for assignment in course.get_assignments():
+    # #     print(f"Assignment: {assignment.id}, Name: {assignment.name}")
+    # columns = course.get_custom_columns()
+    # for col in columns:
+    #     print(f"Column ID: {col.id}, Title: {col.title}")
+
+delete_custom_column_raw(COURSE_ID, 1)
