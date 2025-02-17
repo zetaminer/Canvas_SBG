@@ -12,6 +12,7 @@ TOKEN = None
 COURSE_ID = None
 canvas = None
 
+
 DATA_FILE = "canvas_data.json" # stores the student id and quiz ids so that they can be easily removed
 DEFAULT_PASSWORD = "Pass123!"
 
@@ -21,7 +22,7 @@ DEFAULT_PASSWORD = "Pass123!"
 
 def initialize_canvas():
     """Loads the API token and course ID from config.json, then initializes the Canvas object."""
-    global TOKEN, COURSE_ID, canvas  # Declare global variables
+    global TOKEN, COURSE_ID, canvas, HEADERS  # Declare global variables
 
     try:
         with open("config.json", "r") as file:
@@ -34,6 +35,7 @@ def initialize_canvas():
 
         # Initialize Canvas API instance
         canvas = Canvas(API_URL, TOKEN)
+        HEADERS = {"Authorization": f"Bearer {TOKEN}"}
         print("Canvas API initialized successfully.")
 
     except FileNotFoundError:
@@ -43,13 +45,11 @@ def initialize_canvas():
     except Exception as e:
         print(f"Unexpected error: {e}")
 
-
 def save_data_to_file(data):
     """Saves data to a JSON file."""
     with open(DATA_FILE, "w") as file:
         json.dump(data, file, indent=4)
     print(f"Data saved to {DATA_FILE}")
-
 
 def load_data_from_file():
     """Loads data from a JSON file."""
@@ -102,7 +102,6 @@ def create_test_students():
     data["students"] = students
     save_data_to_file(data)
 
-
 def enroll_students_to_course(course_id):
     """Enrolls the created test students into a given course and accepts invites."""
     course = canvas.get_course(course_id)
@@ -123,7 +122,6 @@ def enroll_students_to_course(course_id):
             print(f"Failed to enroll {student['name']}: {e}")
 
     accept_all_course_invites(course_id)
-
 
 def accept_all_course_invites(course_id):
     """Accepts all pending enrollment invitations for a given course."""
@@ -146,6 +144,26 @@ def accept_all_course_invites(course_id):
         else:
             print(f"Failed to accept enrollment for Student ID: {student_id}")
 
+def remove_students_from_lab():
+    """Completely deletes test students from the Canvas account."""
+    data = load_data_from_file()
+    account = canvas.get_account(ACCOUNT_ID)
+
+    for student in data["students"]:
+        try:
+            # Use delete_user() to permanently remove the user
+            deleted_user = account.delete_user(student["id"])
+            print(f"Successfully deleted user: {student['name']} (ID: {student['id']})")
+
+        except Exception as e:
+            print(f"Failed to delete {student['name']}: {e}")
+
+    # Clear student data from file
+    data["students"] = []
+    save_data_to_file(data)
+
+
+# ==================== Quiz Functions ==================== #
 
 def create_quiz_from_json(course_id, quiz_title, json_file='quiz_data.json'):
     """Creates a quiz in a Canvas course using data from a JSON file and saves quiz info."""
@@ -227,26 +245,6 @@ def create_quiz_from_json(course_id, quiz_title, json_file='quiz_data.json'):
         except Exception as e:
             print(f"Failed to create new quiz: {e}")
 
-
-def remove_students_from_lab():
-    """Completely deletes test students from the Canvas account."""
-    data = load_data_from_file()
-    account = canvas.get_account(ACCOUNT_ID)
-
-    for student in data["students"]:
-        try:
-            # Use delete_user() to permanently remove the user
-            deleted_user = account.delete_user(student["id"])
-            print(f"Successfully deleted user: {student['name']} (ID: {student['id']})")
-
-        except Exception as e:
-            print(f"Failed to delete {student['name']}: {e}")
-
-    # Clear student data from file
-    data["students"] = []
-    save_data_to_file(data)
-
-
 def check_quiz_type(course_id, quiz_id):
     """Checks if a quiz is a Classic Quiz or a New Quiz."""
     course = canvas.get_course(course_id)
@@ -257,6 +255,133 @@ def check_quiz_type(course_id, quiz_id):
         print(f"The quiz '{quiz.title}' is a {quiz_type}.")
     else:
         print("Could not determine quiz type.")
+
+def get_quiz(quiz_id, student_id):
+    """Retrieve quiz details while masquerading as a student."""
+    url = f"{API_URL}/courses/{COURSE_ID}/quizzes/{quiz_id}?as_user_id={student_id}"
+    response = requests.get(url, headers=HEADERS)
+    if response.status_code == 200:
+        quiz_data = response.json()
+        print("Quiz Details:", quiz_data)
+        return quiz_data
+    else:
+        print("Failed to fetch quiz:", response.text)
+        return None
+
+def start_quiz(course_id, quiz_id, student_id):
+    """
+    Start a quiz-taking session for a student using masquerading.
+
+    :param course_id: The ID of the course.
+    :param quiz_id: The ID of the quiz.
+    :param student_id: The ID of the student.
+    :return: QuizSubmission object or None if an error occurs.
+    """
+    try:
+        course = canvas.get_course(course_id)
+        quiz = course.get_quiz(quiz_id)
+
+        # Start quiz attempt while masquerading
+        submission = quiz.create_submission(as_user_id=student_id)
+
+        print(f"✅ Started quiz {quiz_id} for Student {student_id}: {submission}")
+        return submission
+    except Exception as e:
+        print(f"❌ Failed to start quiz for Student {student_id}: {e}")
+        return None
+
+def answer_quiz_questions(course_id, quiz_id, quiz_submission, student_id, correct_answers):
+    """
+    Answer quiz questions using the given correct answers dictionary.
+
+    :param course_id: The ID of the course.
+    :param quiz_id: The ID of the quiz.
+    :param quiz_submission: The QuizSubmission object.
+    :param student_id: The ID of the student.
+    :param correct_answers: Dictionary mapping question numbers to correct answers.
+    """
+    try:
+        questions = quiz_submission.get_submission_questions()
+        answers = []
+
+        for i, question in enumerate(questions, start=1):
+            question_id = question.id
+            possible_answers = question.answers  # List of answer choices
+
+            print(f"🔍 Debug: Question {i} Answers: {possible_answers}")  # Debugging
+
+            # Check for available keys
+            if not possible_answers:
+                print(f"⚠️ No answer choices found for Question {i}")
+                continue
+
+            # Select the correct answer if specified, otherwise pick an incorrect one
+            correct_answer = None
+
+            if i in correct_answers:
+                # Look for "is_correct" field
+                correct_answer = next((ans for ans in possible_answers if ans.get("is_correct")), None)
+            else:
+                # Choose any available incorrect answer
+                correct_answer = next((ans for ans in possible_answers if not ans.get("is_correct", False)), None)
+
+            if correct_answer:
+                answers.append({"id": question_id, "answer": correct_answer["id"]})
+            else:
+                print(f"⚠️ No valid answer found for Question {i}")
+
+        if answers:
+            quiz_submission.answer_submission_questions(quiz_answers=answers)
+            print(f"✅ Answers submitted for Student {student_id}")
+
+    except Exception as e:
+        print(f"❌ Failed to submit answers for Student {student_id}: {e}")
+
+
+def submit_quiz(course_id, quiz_id, quiz_submission, student_id):
+    """
+    Submit the quiz for grading.
+
+    :param course_id: The ID of the course.
+    :param quiz_id: The ID of the quiz.
+    :param quiz_submission: The QuizSubmission object.
+    :param student_id: The ID of the student.
+    """
+    try:
+        quiz_submission.complete()
+        print(f"✅ Quiz {quiz_id} submitted for Student {student_id}")
+    except Exception as e:
+        print(f"❌ Failed to submit quiz for Student {student_id}: {e}")
+
+def complete_quiz_for_students(course_id, quiz_id, correct_answers_map):
+    """
+    Masquerades as each student and completes the quiz.
+
+    :param course_id: The ID of the course.
+    :param quiz_id: The ID of the quiz.
+    :param correct_answers_map: Dictionary mapping student index to questions they should answer correctly.
+    """
+    data = load_data_from_file()
+    students = data["students"]
+
+    for index, student in enumerate(students):
+        student_id = student["id"]
+        print(f"\n🚀 Masquerading as {student['name']} (ID: {student_id}) to take quiz {quiz_id}...")
+
+        # Start the quiz
+        submission = start_quiz(course_id, quiz_id, student_id)
+        if not submission:
+            continue
+
+        # Submit answers
+        correct_questions = correct_answers_map.get(index, [])
+        answer_quiz_questions(course_id, quiz_id, submission, student_id, correct_questions)
+
+        # Submit quiz
+        submit_quiz(course_id, quiz_id, submission, student_id)
+
+        print(f"✅ Quiz {quiz_id} completed for {student['name']}\n")
+
 
 
 # ==================== Debugging & Testing Functions ==================== #
@@ -287,12 +412,21 @@ def check_URL_Response():
 if __name__ == "__main__":
 
     initialize_canvas() # Call the function at the start of the script to ensure global values are set
+
     # Create and enroll students, then accept invites
     # create_test_students()
     # enroll_students_to_course(COURSE_ID)
 
     # Create a quiz and save details
-    # create_quiz_from_json(COURSE_ID, "Test Quiz")
+    # create_quiz_from_json(COURSE_ID, "Test Quiz 3")
+
+    correct_answers_map = {
+        0: [1, 3],  # First student answers Q1, Q3 correctly
+        1: [2, 4],  # Second student answers Q2, Q4 correctly
+        2: [5, 6]  # Third student answers Q5, Q6 correctly
+    }
+
+    complete_quiz_for_students(course_id = COURSE_ID,quiz_id=807, correct_answers_map=correct_answers_map)
 
     # Uncomment to remove test students
-    remove_students_from_lab()
+    # remove_students_from_lab()
