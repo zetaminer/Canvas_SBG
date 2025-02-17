@@ -644,7 +644,7 @@ def remove_existing_mapping_data(description):
     Assumes the block is enclosed in a div with style 'color: lightgrey;'
     and contains the markers MAPPING_DATA_START and MAPPING_DATA_END.
     """
-    pattern = r"<div\s+style=['\"]color:\s*lightgrey;['\"]>.*?MAPPING_DATA_END\s*</div>"
+    pattern = r"<div\s+style=['\"]color:\s*grey;['\"]>.*?MAPPING_DATA_END\s*</div>"
     cleaned = re.sub(pattern, "", description, flags=re.DOTALL | re.IGNORECASE)
     return cleaned.strip()
 
@@ -663,12 +663,12 @@ def append_mapping_to_quiz_description(course_id, quiz_id, mapping_data):
         current_description = remove_existing_mapping_data(quiz_obj.description or "")
 
         # Create a new mapping dictionary with the quiz title as key
-        new_mapping = {quiz_obj.title: mapping_data}
-        mapping_json = json.dumps(new_mapping)
+        # new_mapping = {quiz_obj.title: mapping_data}
+        mapping_json = json.dumps(mapping_data)
 
         # Append the new mapping block using plain text markers
         new_block = (
-            "\n\n<div style='color: lightgrey;'>\n"
+            "\n\n<div style='color: grey;'>\n"
             "MAPPING_DATA_START\n"
             f"{mapping_json}\n"
             "MAPPING_DATA_END\n"
@@ -751,13 +751,17 @@ if __name__ == "__main__":
     # Example usage:
     mapping_data = {
         "quiz_4_mapping_data": {
-            "5/10": "75%",
-            "6/10": "80%",
-            "7/10": "85%"
+            "5": "75%",
+            "6": "80%",
+            "7": "85%",
+            "8": "90%",
+            "9": "90%",
+            "10": "100%",
         }
     }
 
 
-    updated_quiz = append_mapping_to_quiz_description(COURSE_ID, 808, mapping_data)
-    # mapping = get_quiz_mapping(COURSE_ID, 808)
+    # updated_quiz = append_mapping_to_quiz_description(COURSE_ID, 808, mapping_data)
+    mapping = get_quiz_mapping(COURSE_ID, 808)
+    print(mapping)
 

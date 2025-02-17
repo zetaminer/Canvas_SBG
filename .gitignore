@@ -1,5 +1,6 @@
 # Ignore configuration files
 config.json
+canvas_data.json
 
 # Virtual Environment (Windows)
 Lib/
