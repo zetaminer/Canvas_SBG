@@ -3,18 +3,21 @@
         "id": 616,
         "name": "Test Student1",
         "email": "teststudent1@example.com",
-        "password": "Pass123!"
+        "password": "Pass123!",
+        "token": "27383~nrNxVfwL9uNwGPJhxM6HHBLBaFfG9YT7QVa8RLvECKee8nRaW43wvMFzvUtGQVB9"
     },
     {
         "id": 617,
         "name": "Test Student2",
         "email": "teststudent2@example.com",
-        "password": "Pass123!"
+        "password": "Pass123!",
+        "token": "27383~XuQmh6wxwnzy86tAENBk9ker8tVRtTruzYUUPmuhfRUrGfD6P7ana99eMY2THyWy"
     },
     {
         "id": 618,
         "name": "Test Student3",
         "email": "teststudent3@example.com",
-        "password": "Pass123!"
+        "password": "Pass123!",
+        "token": "27383~QehDNnxNMtYyfwNENJa7vDwXvYXfQkLCYmTzVZ8n7HZYxrRcDakD8McYWcX87u8m"
     }
 ]

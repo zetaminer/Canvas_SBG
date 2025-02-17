@@ -259,7 +259,9 @@ def check_quiz_type(course_id, quiz_id):
 
 def get_quiz_answer_key(course_id, quiz_id):
     """
-    Retrieve the correct answers for all quiz questions (requires instructor/admin token).
+    Retrieve the correct answers for all quiz questions (requires instructor/admin token)
+    and also store wrong answers for each question.
+    Returns a dict mapping question_id to a dict with "correct" and "wrong" keys.
     """
     try:
         course = canvas.get_course(course_id)
@@ -276,7 +278,12 @@ def get_quiz_answer_key(course_id, quiz_id):
             correct_answer = next((ans for ans in possible_answers if ans.get("weight", 0) == 100), None)
 
             if correct_answer:
-                answer_key[question_id] = correct_answer["id"]  # Store the correct answer ID
+                all_answer_ids = [ans["id"] for ans in possible_answers]
+                wrong_answers = [ans["id"] for ans in possible_answers if ans["id"] != correct_answer["id"]]
+                answer_key[question_id] = {
+                    "correct": correct_answer["id"],
+                    "wrong": wrong_answers
+                }
 
         print(f"✅ Retrieved answer key for Quiz {quiz_id}: {answer_key}")
         return answer_key
@@ -297,26 +304,37 @@ def get_quiz(quiz_id, student_id):
         print("Failed to fetch quiz:", response.text)
         return None
 
-def start_quiz(course_id, quiz_id, student_id):
+def start_quiz(course_id, quiz_id, student_id, token):
     """
-    Start a quiz-taking session for a student using masquerading.
-
-    :param course_id: The ID of the course.
-    :param quiz_id: The ID of the quiz.
-    :param student_id: The ID of the student.
-    :return: QuizSubmission object or None if an error occurs.
+    Retrieve an active (untaken) quiz submission for a student using the student's token.
+    If none exists, try to create a new submission.
     """
-    try:
-        course = canvas.get_course(course_id)
-        quiz = course.get_quiz(quiz_id)
+    url_submissions = f"{API_URL}/api/v1/courses/{course_id}/quizzes/{quiz_id}/submissions"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    params = {"as_user_id": student_id}
 
-        # Start quiz attempt while masquerading
-        submission = quiz.create_submission(as_user_id=student_id)
+    # Step 1: Check for an existing active submission
+    response = requests.get(url_submissions, headers=headers, params=params)
+    if response.status_code == 200:
+        submissions = response.json().get("quiz_submissions", [])
+        active_submission = next((s for s in submissions if s.get("workflow_state") == "untaken"), None)
+        if active_submission:
+            print(f"✅ Found active submission for Student {student_id}: {active_submission['id']}")
+            return active_submission
+        else:
+            print(f"⚠️ No active submission found for Student {student_id}.")
+    else:
+        print(f"❌ Failed to check submissions for Student {student_id}: {response.text}")
+        return None
 
-        print(f"✅ Started quiz {quiz_id} for Student {student_id}: {submission}")
-        return submission
-    except Exception as e:
-        print(f"❌ Failed to start quiz for Student {student_id}: {e}")
+    # Step 2: If no active submission exists, create one using the student token
+    response = requests.post(url_submissions, headers=headers, params=params)
+    if response.status_code == 200:
+        new_submission = response.json()["quiz_submissions"][0]
+        print(f"✅ Created new submission for Student {student_id}: {new_submission['id']}")
+        return new_submission
+    else:
+        print(f"❌ Failed to create submission for Student {student_id}: {response.status_code} - {response.text}")
         return None
 
 def answer_quiz_questions(course_id, quiz_id, quiz_submission_id, student_id, answer_key, correct_questions):
@@ -365,20 +383,20 @@ def answer_quiz_questions(course_id, quiz_id, quiz_submission_id, student_id, an
     except Exception as e:
         print(f"❌ Failed to submit answers for Student {student_id}: {e}")
 
-def submit_quiz(course_id, quiz_id, quiz_submission, student_id):
+def submit_quiz(course_id, quiz_id, quiz_submission_id, student_id):
     """
-    Submit the quiz for grading.
+    Submit the quiz for grading via a direct API call.
+    """
+    url = f"{API_URL}/api/v1/courses/{course_id}/quizzes/{quiz_id}/submissions/{quiz_submission_id}/complete"
+    headers = {"Authorization": f"Bearer {TOKEN}", "Content-Type": "application/json"}
+    params = {"as_user_id": student_id}
+    response = requests.post(url, headers=headers, params=params)
 
-    :param course_id: The ID of the course.
-    :param quiz_id: The ID of the quiz.
-    :param quiz_submission: The QuizSubmission object.
-    :param student_id: The ID of the student.
-    """
-    try:
-        quiz_submission.complete()
+    if response.status_code == 200:
         print(f"✅ Quiz {quiz_id} submitted for Student {student_id}")
-    except Exception as e:
-        print(f"❌ Failed to submit quiz for Student {student_id}: {e}")
+    else:
+        print(f"❌ Failed to submit quiz for Student {student_id}: {response.status_code} - {response.text}")
+
 
 def complete_quiz_for_students_OLD(course_id, quiz_id, correct_answers_map):
     """
@@ -414,79 +432,184 @@ def complete_quiz_for_students_OLD(course_id, quiz_id, correct_answers_map):
 def complete_quiz_for_students(course_id, quiz_id, correct_answers_map):
     """
     Masquerades as each student and completes the quiz.
+    correct_answers_map is a dictionary mapping student index (0, 1, 2, …)
+    to a list of question orders (e.g. [1, 3]) that the student should answer correctly.
+    This version uses each student's token from the JSON file to create an active submission.
     """
     data = load_data_from_file()
     students = data["students"]
 
-    # Retrieve the correct answer key (requires instructor/admin token)
+    # Retrieve the answer key (requires instructor/admin token)
     answer_key = get_quiz_answer_key(course_id, quiz_id)
     if not answer_key:
         print("❌ Failed to retrieve answer key. Exiting.")
         return
 
+    # Sort question IDs in ascending order; assume that order corresponds to Q1, Q2, ...
+    sorted_question_ids = sorted(answer_key.keys())
+
     for index, student in enumerate(students):
         student_id = student["id"]
-        print(f"\n🚀 Masquerading as {student['name']} (ID: {student_id}) to take quiz {quiz_id}...")
-
-        # Start the quiz and get the correct submission ID
-        quiz_submission_id = start_quiz(course_id, quiz_id, student_id)
-        if not quiz_submission_id:
+        student_token = student.get("token")
+        if not student_token:
+            print(f"❌ No token found for Student {student_id}")
             continue
 
-        # Prepare answers (only correct answers if specified)
+        print(f"\n🚀 Masquerading as {student['name']} (ID: {student_id}) to take quiz {quiz_id}...")
+
+        # Start or retrieve the quiz submission using the student token
+        submission = start_quiz(course_id, quiz_id, student_id, student_token)
+        if not submission:
+            continue
+
+        # Build the student's answers based on question order
         correct_questions = correct_answers_map.get(index, [])
-        student_answers = {
-            q_id: answer_key[q_id] if q_id in correct_questions else random.choice(list(answer_key.values()))
-            for q_id in answer_key
-        }
+        student_answers = {}
+        for idx, q_id in enumerate(sorted_question_ids, start=1):
+            if idx in correct_questions:
+                student_answers[q_id] = answer_key[q_id]["correct"]
+            else:
+                if answer_key[q_id]["wrong"]:
+                    student_answers[q_id] = random.choice(answer_key[q_id]["wrong"])
+                else:
+                    student_answers[q_id] = answer_key[q_id]["correct"]
 
-        # Submit answers using masquerading
-        submit_answers_masquerading(course_id, quiz_id, quiz_submission_id, student_id, student_answers, TOKEN)
+        # Assuming 'submission' is the quiz submission dict you received from start_quiz
+        attempt = submission.get("attempt")
+        validation_token = submission.get("validation_token")
+        # Build your student_answers dict as before...
+        submit_answers_masquerading(course_id, quiz_id, submission["id"], student_id, student_answers, attempt,
+                                    validation_token, student_token)
 
-        # Submit quiz
-        submit_quiz(course_id, quiz_id, quiz_submission_id, student_id)
+        # Complete the quiz submission using the student token
+        complete_quiz_submission(course_id, quiz_id, submission, student_id, student_token)
 
         print(f"✅ Quiz {quiz_id} completed for {student['name']}\n")
 
-def submit_answers_masquerading(course_id, quiz_id, quiz_submission_id, student_id, answers, admin_token):
+def complete_quiz_submission(course_id, quiz_id, submission, student_id, access_code=None):
     """
-    Submit answers to a Canvas Quiz while masquerading as a student.
+    Complete (turn in) a quiz submission using the Canvas API.
 
-    :param course_id: The course ID
-    :param quiz_id: The quiz ID
-    :param quiz_submission_id: The student's quiz submission ID
-    :param student_id: The student's ID (for masquerading)
-    :param answers: A dictionary of question_id -> selected_answer_id
-    :param admin_token: Your admin API token
+    Required parameters:
+      - submission: The quiz submission object (a dict) returned when starting the quiz.
+      - student_id: The ID of the student (used with masquerading).
+      - access_code: (Optional) If the quiz requires an access code.
+
+    This function uses the submission's "id", "attempt", and "validation_token"
+    to make the API call.
     """
+    quiz_submission_id = submission["id"]
+    attempt = submission.get("attempt")
+    validation_token = submission.get("validation_token")
 
-    # 🔹 Canvas API endpoint for submitting quiz answers (using API_URL dynamically)
-    url = f"{API_URL}/api/v1/quiz_submissions/{quiz_submission_id}/questions"
+    if attempt is None or validation_token is None:
+        print(f"❌ Submission data incomplete for Student {student_id}. Cannot complete quiz.")
+        return None
 
-    # 🔹 Authentication headers
+    url = f"{API_URL}/api/v1/courses/{course_id}/quizzes/{quiz_id}/submissions/{quiz_submission_id}/complete"
     headers = {
-        "Authorization": f"Bearer {admin_token}",
+        "Authorization": f"Bearer {TOKEN}",
         "Content-Type": "application/json"
     }
-
-    # 🔹 Format request payload correctly
+    params = {"as_user_id": student_id}
     payload = {
+        "attempt": attempt,
+        "validation_token": validation_token,
+        "access_code": access_code  # Can be None if not needed
+    }
+
+    response = requests.post(url, headers=headers, params=params, json=payload)
+    if response.status_code == 200:
+        print(f"✅ Quiz {quiz_id} submitted for Student {student_id}")
+        return response.json()
+    else:
+        print(f"❌ Failed to submit quiz for Student {student_id}: {response.status_code} - {response.text}")
+        return None
+
+
+def submit_answers_masquerading(course_id, quiz_id, quiz_submission_id, student_id, answers, attempt, validation_token,
+                                student_token):
+    """
+    Submit answers to a Canvas Quiz while masquerading as a student using a student token.
+
+    This version includes the required "attempt" and "validation_token" in the payload.
+
+    :param course_id: The course ID.
+    :param quiz_id: The quiz ID.
+    :param quiz_submission_id: The quiz submission ID.
+    :param student_id: The student's ID.
+    :param answers: A dictionary mapping question_id to the selected answer_id.
+    :param attempt: The attempt number from the submission object.
+    :param validation_token: The validation token from the submission object.
+    :param student_token: The student's API token.
+    """
+    url = f"{API_URL}/api/v1/quiz_submissions/{quiz_submission_id}/questions"
+    headers = {
+        "Authorization": f"Bearer {student_token}",
+        "Content-Type": "application/json"
+    }
+    params = {"as_user_id": student_id}
+
+    payload = {
+        "attempt": attempt,
+        "validation_token": validation_token,
         "quiz_questions": [
             {"id": question_id, "answer": answer_id}
             for question_id, answer_id in answers.items()
         ]
     }
 
-    # 🔹 Make the request with masquerading
-    params = {"as_user_id": student_id}
-
     response = requests.post(url, json=payload, headers=headers, params=params)
-
-    # 🔹 Handle response
     if response.status_code == 200:
         print(f"✅ Successfully submitted answers for Student {student_id}")
     else:
-        print(f"❌ Failed to submit answers for Student {student_id}: {response.status_code} - {response.text}")
+        print(
+            f"❌ Masquerade Failed to submit answers for Student {student_id}: {response.status_code} - {response.text}")
+
+
+def complete_quiz_submission(course_id, quiz_id, submission, student_id, student_token, access_code=None):
+    """
+    Complete (turn in) a quiz submission using the Canvas API.
+
+    This function uses the submission's "attempt" number and "validation_token"
+    from the submission object, and calls the complete endpoint using the student token.
+
+    :param course_id: The course ID.
+    :param quiz_id: The quiz ID.
+    :param submission: The quiz submission object (a dict) returned from start_quiz.
+    :param student_id: The student's ID.
+    :param student_token: The student's API token.
+    :param access_code: (Optional) The quiz access code, if required.
+    :return: The JSON response on success; None otherwise.
+    """
+    quiz_submission_id = submission["id"]
+    attempt = submission.get("attempt")
+    validation_token = submission.get("validation_token")
+
+    if attempt is None or validation_token is None:
+        print(f"❌ Submission data incomplete for Student {student_id}. Cannot complete quiz.")
+        return None
+
+    url = f"{API_URL}/api/v1/courses/{course_id}/quizzes/{quiz_id}/submissions/{quiz_submission_id}/complete"
+    headers = {
+        "Authorization": f"Bearer {student_token}",
+        "Content-Type": "application/json"
+    }
+    params = {"as_user_id": student_id}
+    payload = {
+        "attempt": attempt,
+        "validation_token": validation_token
+    }
+    if access_code:
+        payload["access_code"] = access_code
+
+    response = requests.post(url, headers=headers, params=params, json=payload)
+    if response.status_code == 200:
+        print(f"✅ Quiz {quiz_id} submitted for Student {student_id}")
+        return response.json()
+    else:
+        print(f"❌ Failed to submit quiz for Student {student_id}: {response.status_code} - {response.text}")
+        return None
 
 
 # ==================== Debugging & Testing Functions ==================== #
@@ -523,7 +646,7 @@ if __name__ == "__main__":
     # enroll_students_to_course(COURSE_ID)
 
     # Create a quiz and save details
-    # create_quiz_from_json(COURSE_ID, "Test Quiz 4")
+    # create_quiz_from_json(COURSE_ID, "Test Quiz 5")
 
     correct_answers_map = {
         0: [1, 3],  # First student answers Q1, Q3 correctly
@@ -531,7 +654,7 @@ if __name__ == "__main__":
         2: [5, 6]  # Third student answers Q5, Q6 correctly
     }
 
-    complete_quiz_for_students(course_id = COURSE_ID,quiz_id=808, correct_answers_map=correct_answers_map)
+    complete_quiz_for_students(course_id = COURSE_ID,quiz_id=809, correct_answers_map=correct_answers_map)
 
     # Uncomment to remove test students
     # remove_students_from_lab()
